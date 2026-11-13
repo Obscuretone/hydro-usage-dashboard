@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hydro · Usage</title><link rel="stylesheet" href="style.css"><script defer src="plotly.min.js"></script><script defer src="app.js"></script></head>
+<body><main>
+<header><div><h1>Electricity usage</h1><p id="freshness">Loading your readings…</p></div><button id="refresh" class="quiet">Refresh</button></header>
+<section class="toolbar" aria-label="Graph controls"><div class="ranges" aria-label="Time range"><button data-days="7" class="active">7 days</button><button data-days="30">30 days</button><button data-days="all">All data</button></div><div class="legend"><span><i class="usage"></i>Usage · kWh</span><span><i class="temperature"></i>Outside · daily mean °C</span></div></section>
+<div id="error" role="alert"></div>
+<section class="graph-panel"><div id="graph" tabindex="0" aria-label="Hourly electricity usage with daily outdoor temperature. Drag to move through time; arrow keys move the visible window."></div><div class="graph-bottom"><span>Drag or swipe through time. Use the overview below to jump.</span><div><button id="earlier" class="quiet" aria-label="Earlier readings">←</button><button id="later" class="quiet" aria-label="Later readings">→</button></div></div></section>
+<section class="stats" aria-label="Stats for visible readings"><div><span>Shown usage</span><strong id="total">—</strong></div><div><span>Average / hour</span><strong id="average">—</strong></div><div><span>Highest hour</span><strong id="peak">—</strong></div><p id="period"></p></section>
+<footer>Hourly, delayed readings · Toronto time · Outside temperature is Hydro’s daily mean, not an hourly reading. Missing values stay empty.</footer>
+</main></body></html>
