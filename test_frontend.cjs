@@ -31,3 +31,12 @@ test('authentication failure stays visible with saved readings',()=>{
  assert.match(freshness({...fresh,refresh:{state:'sign_in_required',last_success_at:fresh.synced}},now).warning,/sign-in required/);
  assert.match(freshness({...fresh,refresh:{state:'sync_failed'}},now).warning,/refresh failed/);
 });
+
+test('weather estimates use Toronto time and retain zero and gaps',()=>{
+ const {weatherWall,weatherSummary}=require('./deploy/assets/app.js');
+ assert.equal(weatherWall('2026-11-24T00:00:00Z'),Date.parse('2026-11-23T19:00:00Z'));
+ const w={label:'Example',state:'ok',current:{time:'2026-11-23T23:30:00Z',temp:0}};
+ assert.match(weatherSummary(w,Date.parse('2026-11-23T23:45:00Z')),/0.0°C/);
+ assert.match(weatherSummary(w,Date.parse('2026-11-24T04:00:00Z')),/overdue/);
+ w.state='fetch_failed';assert.match(weatherSummary(w,Date.parse('2026-11-23T23:45:00Z')),/overdue/);
+});

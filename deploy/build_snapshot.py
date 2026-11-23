@@ -7,7 +7,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from deploy.hydro_store import connect
 
 
-def write_snapshot(hours,meta,out,assets,status=None):
+def write_snapshot(hours,meta,out,assets,status=None,weather=None):
     if not hours:
         raise ValueError('No readings; preserve the previous snapshot.')
     out=Path(out);out.mkdir(parents=True,exist_ok=True)
@@ -21,6 +21,8 @@ def write_snapshot(hours,meta,out,assets,status=None):
              'rate':meta.get('rate'),'option':meta.get('option'),'hours':hours,
              'daily':meta.get('hydro_daily',[]),'periods':meta.get('billing_periods',[]),
              'expected':expected,'timezone':'America/Toronto'}
+    if weather:
+        payload['weather']={k:weather.get(k) for k in ['source','kind','label','fetched_at','state','current','hourly']}
     if status:
         payload['refresh']={k:status.get(k) for k in ['state','last_attempt_at','last_success_at']}
     (out/'data.json').write_text(json.dumps(payload,separators=(',',':'),allow_nan=False))
@@ -30,7 +32,7 @@ def write_snapshot(hours,meta,out,assets,status=None):
             'latest':hours[-1]['time'],'generated':payload['generated']}
 
 
-def build(out,assets,status=None):
+def build(out,assets,status=None,weather=None):
     with connect() as connection,connection.cursor() as db:
         db.execute('SELECT DISTINCT contract FROM hours')
         ids=[r[0] for r in db]
@@ -44,7 +46,7 @@ def build(out,assets,status=None):
                           'hour':local.hour,'kwh':kwh,'temp':temp,'quality':quality})
         db.execute('SELECT payload FROM metadata WHERE contract=%s',(key,))
         row=db.fetchone();meta=json.loads(row[0]) if row else {}
-    return write_snapshot(hours,meta,out,assets,status)
+    return write_snapshot(hours,meta,out,assets,status,weather)
 
 
 if __name__=='__main__':

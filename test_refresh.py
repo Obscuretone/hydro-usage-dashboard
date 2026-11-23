@@ -55,3 +55,15 @@ def test_failed_build_keeps_served_snapshot(tmp_path,monkeypatch):
     with pytest.raises(ValueError):module.publish({'state':'ok'})
     assert (public/'current/data.json').read_text()=='previous fixture'
     assert {p.name for p in public.iterdir()}=={'previous','current'}
+
+
+def test_weather_only_never_contacts_hydro_or_advances_success(tmp_path,monkeypatch):
+    monkeypatch.setattr(module,'STATE',tmp_path);monkeypatch.setattr(module,'STATUS',tmp_path/'status.json')
+    module.write_status({'last_success_at':'previous','state':'ok'})
+    monkeypatch.setattr(module.sys,'argv',['refresh.py','--weather-only'])
+    def forbidden(*a,**kw):raise AssertionError('Hydro must not run for weather-only refresh')
+    monkeypatch.setattr(module.subprocess,'run',forbidden)
+    monkeypatch.setattr(module,'refresh_weather',lambda state:None)
+    captured=[];monkeypatch.setattr(module,'publish',lambda status:captured.append(status))
+    module.main()
+    assert captured[0]=={'last_success_at':'previous','state':'ok'}

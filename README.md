@@ -1,6 +1,6 @@
 # Hydro usage dashboard
 
-A small, self-hosted Hydro-Québec dashboard: one scrollable graph of hourly electricity usage and daily mean outside temperature. Includes 7-day, 30-day and full-history views, missing-data gaps, and statistics for the visible readings.
+A small, self-hosted Hydro-Québec dashboard: one scrollable graph of hourly electricity usage, daily mean outside temperature and optional current weather estimates. Includes 7-day, 30-day and full-history views, missing-data gaps, and statistics for the visible readings.
 
 The browser serves static files. An hourly one-shot Python importer updates MariaDB and atomically publishes a snapshot. It can share an existing database server and HTTPS virtual host; it needs no persistent Python worker or JavaScript build step.
 
@@ -42,10 +42,22 @@ Unattended refresh never attempts an interactive login. It returns code 20 when 
 
 Serve only `generated/current/` behind HTTPS and authentication. Protect **every file**, including `data.json`, which contains private consumption and billing metadata. The NTKA/OIDC reverse-proxy example is in [deployment notes](deploy/README.md). Do not publish account snapshots through GitHub Pages.
 
+## Optional current outdoor weather
+
+Create a private `weather-config.json` in the refresh data directory (excluded from Git), containing `latitude`, `longitude` and a city-level `label`. City coordinates are sufficient; no exact address is needed. The weather request goes to Open-Meteo. Snapshots include the city label and temperature timeseries, but exclude coordinates.
+
+```json
+{"latitude": 40.0, "longitude": -70.0, "label": "Example city"}
+```
+
+Normal refresh collects weather as well as energy. For a separate 15-minute weather schedule, use the same command with `--weather-only`; it never contacts Hydro or advances the energy sync timestamp. Both modes serialize publication using the same file lock. `--publish-only` reads existing caches without network requests. See [deployment notes](deploy/README.md).
+
+Open-Meteo current conditions are model estimates at 15-minute intervals; historical hourly values are also model data. The current estimate's timestamp is shown independently of retrieval time. Weather outages retain cached readings with an overdue warning. History starts with up to 92 past days, accumulates thereafter, and retains up to 370 days; future hourly forecasts are excluded. Attribution: [Open-Meteo](https://open-meteo.com/) ([API documentation](https://open-meteo.com/en/docs)).
+
 ## Reading the graph
 
 - Usage is delayed hourly energy in **kWh**, not per-second power. It cannot identify an appliance by itself.
-- Outside temperature is Hydro's **daily mean**, repeated across the day, not current weather or indoor temperature. No separate weather feed is enabled.
+- The dotted amber line is Hydro's **daily mean** temperature. Optional blue weather estimates come from Open-Meteo, with a separate current-temperature timestamp. Neither is an indoor or on-site sensor reading.
 - Labels use Toronto time. Missing readings remain gaps; valid zeroes are retained.
 - Hydro's unqualified local hour labels are ambiguous around daylight-saving changes. The importer skips those transition days rather than guessing.
 - Last successful sync is distinct from snapshot generation. Sign-in, failed-refresh, overdue and stale-upstream states are visible.

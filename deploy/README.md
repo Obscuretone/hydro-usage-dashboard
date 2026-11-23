@@ -29,6 +29,14 @@ Example cron, using a non-overlap lock:
 17 * * * * flock -n /var/lib/hydro/refresh.lock /opt/hydro/.venv/bin/python /opt/hydro/deploy/refresh.py --data-dir /var/lib/hydro/account --publish-dir /var/lib/hydro/snapshots >> /var/lib/hydro/refresh.log 2>&1
 ```
 
+To refresh configured weather every 15 minutes without contacting Hydro, add:
+
+```cron
+*/15 * * * * /opt/hydro/.venv/bin/python /opt/hydro/deploy/refresh.py --data-dir /var/lib/hydro/account --publish-dir /var/lib/hydro/snapshots --weather-only >> /var/lib/hydro/weather.log 2>&1
+```
+
+The internal shared lock serializes weather and energy publication. Weather uses a bounded HTTPS request, caches estimates in the private data directory, and adds no persistent worker. A weather outage does not advance its timestamps or prevent energy publication.
+
 Monitor exit status and rotate logs. Snapshot publication uses a same-filesystem atomic symlink switch, retains three snapshots, and preserves the served snapshot if export fails. Keep `current` as a symlink. Failed sync publishes cached readings with its failure state and does not advance the last-success timestamp. Reconnect interactively on exit 20; scheduled jobs never solicit email codes.
 
 ## Shared NTKA / OIDC login

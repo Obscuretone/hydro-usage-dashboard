@@ -32,3 +32,5 @@ __pycache__/
 .DS_Store
 
 refresh-status.json
+weather-config.json
+weather-cache.json

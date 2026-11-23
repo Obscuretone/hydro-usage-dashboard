@@ -5,15 +5,24 @@ const format=(n,d=1)=>Number.isFinite(n)?n.toLocaleString('en-CA',{maximumFracti
 const wallTime=r=>Date.parse(r.day+'T'+String(r.hour).padStart(2,'0')+':00:00Z');
 // Axis values deliberately represent Toronto wall-clock labels. Plotly does not
 // apply the visitor's timezone, and hourly energy is never interpolated.
+function weatherWall(iso){const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(iso)).map(p=>[p.type,p.value]));return Date.parse(p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute+':00Z')}
+function weatherSummary(weather,now=Date.now()){
+ if(!weather)return '';
+ const c=weather.current;if(!c||!Number.isFinite(c.temp))return 'Outdoor weather is temporarily unavailable.';
+ const t=Date.parse(c.time),stamp=Number.isFinite(t)?new Date(t).toLocaleTimeString('en-CA',{timeZone:'America/Toronto',hour:'2-digit',minute:'2-digit'}):'unknown time';
+ const stale=weather.state!=='ok'||!Number.isFinite(t)||now-t>2*HOUR;
+ return (weather.label||'Outside')+' '+format(c.temp)+'°C · weather estimate at '+stamp+(stale?' · update overdue':'');
+}
 function series(data){
  const hours=[...data.hours].sort((a,b)=>wallTime(a)-wallTime(b));
  if(!hours.length)throw Error('No readings are available yet.');
- const start=wallTime(hours[0]),end=wallTime(hours[hours.length-1])+HOUR;
+ const weather=new Map((data.weather?.hourly||[]).map(r=>[weatherWall(r.time),r.temp]));
+ const start=wallTime(hours[0]),end=Math.max(wallTime(hours[hours.length-1])+HOUR,...[...weather.keys()].map(t=>t+HOUR));
  const energy=new Map(hours.map(r=>[wallTime(r),r]));
  const daily=new Map(data.daily.map(r=>[r.dateJourConso,r.tempMoyenneQuot]));
- const x=[],usage=[],temperature=[],dayLabels=[];
- for(let t=start;t<end;t+=HOUR){const day=new Date(t).toISOString().slice(0,10),r=energy.get(t),temp=daily.get(day);x.push(new Date(t).toISOString().slice(0,19));usage.push(r?r.kwh:null);temperature.push(Number.isFinite(temp)?temp:null);dayLabels.push(day)}
- return {hours,start,end,x,usage,temperature,dayLabels};
+ const x=[],usage=[],temperature=[],outside=[],dayLabels=[];
+ for(let t=start;t<end;t+=HOUR){const day=new Date(t).toISOString().slice(0,10),r=energy.get(t),temp=daily.get(day);x.push(new Date(t).toISOString().slice(0,19));usage.push(r?r.kwh:null);temperature.push(Number.isFinite(temp)?temp:null);outside.push(Number.isFinite(weather.get(t))?weather.get(t):null);dayLabels.push(day)}
+ return {hours,start,end,x,usage,temperature,outside,dayLabels};
 }
 function visibleStats(hours,range){const selected=hours.filter(r=>wallTime(r)>=range[0]&&wallTime(r)<range[1]);const total=selected.reduce((n,r)=>n+r.kwh,0);return {count:selected.length,total,average:selected.length?total/selected.length:NaN,peak:selected.length?Math.max(...selected.map(r=>r.kwh)):NaN}}
 function clampRange(a,b,start,end){let width=Math.min(b-a,end-start);if(!Number.isFinite(width)||width<=0)width=Math.min(7*DAY,end-start);let left=Math.max(start,Math.min(a,end-width));return[left,left+width]}
@@ -35,11 +44,12 @@ function showRange(a,b){RANGE=clampRange(a,b,SERIES.start,SERIES.end);Plotly.rel
 function step(direction){if(ready){const amount=(RANGE[1]-RANGE[0])*.8*direction;showRange(RANGE[0]+amount,RANGE[1]+amount)}}
 async function load(){try{
  const res=await fetch('data.json',{cache:'no-store'});if(res.status===401)throw Error('Your dashboard sign-in expired. Reload this page to sign in again.');if(!res.ok)throw Error('Unable to load readings ('+res.status+').');DATA=await res.json();SERIES=series(DATA);RANGE=ready&&RANGE?clampRange(...RANGE,SERIES.start,SERIES.end):[Math.max(SERIES.start,SERIES.end-7*DAY),SERIES.end];
- const current=freshness(DATA);byId('freshness').textContent=current.text;byId('error').textContent=current.warning;
+ const current=freshness(DATA);byId('freshness').textContent=current.text;byId('error').textContent=current.warning;byId('weather').textContent=weatherSummary(DATA.weather);byId('weather').title=DATA.weather?.fetched_at?'Weather retrieved '+DATA.weather.fetched_at:'';byId('weather-legend').hidden=!DATA.weather;
  const narrow=window.innerWidth<650;
  await Plotly.react('graph',[
   {x:SERIES.x,y:SERIES.usage,type:'bar',name:'Hourly usage',marker:{color:'#63d9bd'},opacity:.86,hovertemplate:'%{x|%b %d, %H:%M}<br><b>%{y:.2f} kWh</b> used during this hour<extra></extra>'},
-  {x:SERIES.x,y:SERIES.temperature,type:'scatter',mode:'lines',name:'Outside · daily mean',yaxis:'y2',connectgaps:false,line:{color:'#ecb16a',width:2,shape:'hv'},customdata:SERIES.dayLabels,hovertemplate:'%{customdata}<br>Outside daily mean: <b>%{y:.1f}°C</b><extra></extra>'}
+  {x:SERIES.x,y:SERIES.temperature,type:'scatter',mode:'lines',name:'Outside · daily mean',yaxis:'y2',connectgaps:false,line:{color:'#ecb16a',width:1.5,shape:'hv',dash:'dot'},customdata:SERIES.dayLabels,hovertemplate:'%{customdata}<br>Outside daily mean: <b>%{y:.1f}°C</b><extra></extra>'},
+  {x:SERIES.x,y:SERIES.outside,type:'scatter',mode:'lines',name:'Outside · weather estimate',yaxis:'y2',connectgaps:false,line:{color:'#8dc5ff',width:2},hovertemplate:'%{x|%b %d, %H:%M}<br>Weather estimate: <b>%{y:.1f}°C</b><extra></extra>'}
  ],{
   paper_bgcolor:'#102126',plot_bgcolor:'#102126',font:{family:'system-ui',color:'#92aaa9',size:narrow?10:12},margin:{l:narrow?42:58,r:narrow?42:58,t:22,b:30},showlegend:false,dragmode:'pan',hovermode:'x unified',hoverlabel:{bgcolor:'#183139',bordercolor:'#36555a',font:{color:'#e7f0ef'}},bargap:.12,uirevision:'hydro-simple',
   xaxis:{type:'date',range:RANGE.map(t=>new Date(t).toISOString().slice(0,19)),gridcolor:'#20363c',zeroline:false,tickformat:'%b %d\n%H:%M',rangeslider:{visible:true,thickness:.12,bgcolor:'#0c191e',borderwidth:0,range:[new Date(SERIES.start).toISOString().slice(0,19),new Date(SERIES.end).toISOString().slice(0,19)]}},
@@ -55,4 +65,4 @@ if(typeof document!=='undefined'){
  document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{if(!ready)return;const n=b.dataset.days;showRange(n==='all'?SERIES.start:SERIES.end-Number(n)*DAY,SERIES.end)});
  byId('earlier').onclick=()=>step(-1);byId('later').onclick=()=>step(1);byId('refresh').onclick=load;load();
 }
-if(typeof module!=='undefined')module.exports={series,visibleStats,clampRange,wallTime,freshness};
+if(typeof module!=='undefined')module.exports={series,visibleStats,clampRange,wallTime,freshness,weatherWall,weatherSummary};
