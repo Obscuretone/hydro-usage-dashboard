@@ -30,3 +30,5 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 .DS_Store
+
+refresh-status.json

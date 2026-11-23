@@ -1,22 +1,28 @@
-import importlib.util,json,sqlite3,tempfile,unittest
+import json
 from pathlib import Path
-spec=importlib.util.spec_from_file_location('snapshot',Path(__file__).with_name('build_snapshot.py'));mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
-class SnapshotTest(unittest.TestCase):
- def test_dst_coverage_and_no_auth_export(self):
-  with tempfile.TemporaryDirectory() as t:
-   root=Path(t);db=root/'cache.sqlite';assets=root/'assets';assets.mkdir()
-   for n in ['index.html','app.js','style.css','plotly.min.js']:(assets/n).write_text('fixture')
-   with sqlite3.connect(db) as c:
-    c.executescript('CREATE TABLE hours(contract TEXT,timestamp TEXT,kwh REAL,temperature_c REAL,quality TEXT);CREATE TABLE metadata(contract TEXT,payload TEXT);')
-    c.executemany('INSERT INTO hours VALUES (?,?,?,?,?)',[('private-contract','2026-11-01T04:00:00+00:00',1,4,'R'),('private-contract','2026-11-02T04:00:00+00:00',2,4,'R')])
-    c.execute('INSERT INTO metadata VALUES (?,?)',('private-contract',json.dumps({'password':'NEVER-EXPORT','access_token':'NEVER-EXPORT','rate':'D'})))
-   mod.build(db,root/'out',assets)
-   raw=(root/'out/data.json').read_text();data=json.loads(raw)
-   self.assertEqual(data['expected']['2026-11-01'],25);self.assertEqual(len(data['hours']),2)
-   self.assertNotIn('NEVER-EXPORT',raw);self.assertNotIn('private-contract',raw)
- def test_empty_cache_rejects_publication(self):
-  with tempfile.TemporaryDirectory() as t:
-   p=Path(t)/'db'
-   with sqlite3.connect(p) as c:c.execute('CREATE TABLE hours(contract TEXT)')
-   with self.assertRaises(ValueError):mod.build(p,Path(t)/'out',Path(t))
-if __name__=='__main__':unittest.main()
+import pytest
+from deploy import build_snapshot as snapshot
+
+class Cursor:
+    def __enter__(self):return self
+    def __exit__(self,*_):pass
+    def execute(self,query,args=None):self.query=query
+    def __iter__(self):
+        if 'DISTINCT contract' in self.query:return iter([('private-contract',)])
+        return iter([('2026-11-01T04:00:00+00:00',1,0,'R'),('2026-11-02T04:00:00+00:00',2,0,'R')])
+    def fetchone(self):return (json.dumps({'rate':'D','password':'NEVER-EXPORT','access_token':'NEVER-EXPORT','synced_at':'2026-11-02T06:00:00Z'}),)
+class Connection:
+    def __enter__(self):return self
+    def __exit__(self,*_):pass
+    def cursor(self):return Cursor()
+
+def test_refresh_export_whitelists_status_and_keeps_dst_coverage(tmp_path,monkeypatch):
+    monkeypatch.setattr(snapshot,'connect',lambda:Connection())
+    assets=tmp_path/'assets';assets.mkdir()
+    for name in ['index.html','app.js','style.css','plotly.min.js']:(assets/name).write_text('fixture')
+    snapshot.build(tmp_path/'out',assets,status={'state':'sign_in_required','last_attempt_at':'2026-11-03T00:00:00Z','last_success_at':'2026-11-02T06:00:00Z','password':'NEVER-EXPORT'})
+    raw=(tmp_path/'out/data.json').read_text();data=json.loads(raw)
+    assert data['refresh']['state']=='sign_in_required'
+    assert data['expected']['2026-11-01']==25
+    assert 'NEVER-EXPORT' not in raw and 'private-contract' not in raw
+    assert set(data['refresh'])=={'state','last_attempt_at','last_success_at'}

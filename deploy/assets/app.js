@@ -17,14 +17,25 @@ function series(data){
 }
 function visibleStats(hours,range){const selected=hours.filter(r=>wallTime(r)>=range[0]&&wallTime(r)<range[1]);const total=selected.reduce((n,r)=>n+r.kwh,0);return {count:selected.length,total,average:selected.length?total/selected.length:NaN,peak:selected.length?Math.max(...selected.map(r=>r.kwh)):NaN}}
 function clampRange(a,b,start,end){let width=Math.min(b-a,end-start);if(!Number.isFinite(width)||width<=0)width=Math.min(7*DAY,end-start);let left=Math.max(start,Math.min(a,end-width));return[left,left+width]}
+function freshness(data,now=Date.now()){
+ const refresh=data.refresh||{},lastSuccess=refresh.last_success_at||data.synced;
+ const success=Date.parse(lastSuccess),latest=data.hours[data.hours.length-1],latestTime=Date.parse(latest.time);
+ const stamp=Number.isFinite(success)?new Date(success).toLocaleString('en-CA',{timeZone:'America/Toronto',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'not recorded';
+ let warning='';
+ if(refresh.state==='sign_in_required')warning='Hydro sign-in required. Showing saved readings.';
+ else if(refresh.state==='sync_failed')warning='The last refresh failed. Showing saved readings.';
+ else if(!Number.isFinite(success)||now-success>3*HOUR)warning='Updates are overdue. Showing saved readings.';
+ else if(!Number.isFinite(latestTime)||now-latestTime>3*DAY)warning='Hydro has not supplied recent readings. Showing the latest available data.';
+ return {text:(data.hours.every(r=>r.quality==='synthetic')?'Synthetic demo · ':'')+'Readings through '+latest.day+' '+String(latest.hour).padStart(2,'0')+':00 · last successful sync '+stamp,warning};
+}
 let DATA,SERIES,RANGE,ready=false;
 function dateLabel(t){return new Date(t).toLocaleDateString('en-CA',{timeZone:'UTC',month:'short',day:'numeric'})}
 function updateStats(){const s=visibleStats(SERIES.hours,RANGE);byId('total').textContent=format(s.total)+' kWh';byId('average').textContent=format(s.average,2)+' kWh';byId('peak').textContent=format(s.peak,2)+' kWh';byId('period').textContent=dateLabel(RANGE[0])+' – '+dateLabel(RANGE[1]-1)+' · '+s.count.toLocaleString()+' available hours';document.querySelectorAll('[data-days]').forEach(button=>{const days=button.dataset.days,active=days==='all'?RANGE[0]===SERIES.start&&RANGE[1]===SERIES.end:Math.abs((RANGE[1]-RANGE[0])/DAY-Number(days))<.02;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))})}
 function showRange(a,b){RANGE=clampRange(a,b,SERIES.start,SERIES.end);Plotly.relayout('graph',{'xaxis.range':[new Date(RANGE[0]).toISOString().slice(0,19),new Date(RANGE[1]).toISOString().slice(0,19)]});updateStats()}
 function step(direction){if(ready){const amount=(RANGE[1]-RANGE[0])*.8*direction;showRange(RANGE[0]+amount,RANGE[1]+amount)}}
 async function load(){try{
- const res=await fetch('data.json',{cache:'no-store'});if(!res.ok)throw Error('Unable to load readings ('+res.status+').');DATA=await res.json();SERIES=series(DATA);RANGE=ready&&RANGE?clampRange(...RANGE,SERIES.start,SERIES.end):[Math.max(SERIES.start,SERIES.end-7*DAY),SERIES.end];
- const latest=SERIES.hours[SERIES.hours.length-1];byId('freshness').textContent='Readings through '+latest.day+' '+String(latest.hour).padStart(2,'0')+':00 · checked hourly';byId('error').textContent='';
+ const res=await fetch('data.json',{cache:'no-store'});if(res.status===401)throw Error('Your dashboard sign-in expired. Reload this page to sign in again.');if(!res.ok)throw Error('Unable to load readings ('+res.status+').');DATA=await res.json();SERIES=series(DATA);RANGE=ready&&RANGE?clampRange(...RANGE,SERIES.start,SERIES.end):[Math.max(SERIES.start,SERIES.end-7*DAY),SERIES.end];
+ const current=freshness(DATA);byId('freshness').textContent=current.text;byId('error').textContent=current.warning;
  const narrow=window.innerWidth<650;
  await Plotly.react('graph',[
   {x:SERIES.x,y:SERIES.usage,type:'bar',name:'Hourly usage',marker:{color:'#63d9bd'},opacity:.86,hovertemplate:'%{x|%b %d, %H:%M}<br><b>%{y:.2f} kWh</b> used during this hour<extra></extra>'},
@@ -44,4 +55,4 @@ if(typeof document!=='undefined'){
  document.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{if(!ready)return;const n=b.dataset.days;showRange(n==='all'?SERIES.start:SERIES.end-Number(n)*DAY,SERIES.end)});
  byId('earlier').onclick=()=>step(-1);byId('later').onclick=()=>step(1);byId('refresh').onclick=load;load();
 }
-if(typeof module!=='undefined')module.exports={series,visibleStats,clampRange,wallTime};
+if(typeof module!=='undefined')module.exports={series,visibleStats,clampRange,wallTime,freshness};

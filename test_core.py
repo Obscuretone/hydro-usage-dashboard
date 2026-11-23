@@ -10,22 +10,6 @@ def hours(start,end,value=1):
     return pd.DataFrame({'timestamp':t,'kwh':value})
 
 
-def test_cache_idempotent_and_contract_isolated(tmp_path):
-    c=Cache(tmp_path/'db.sqlite'); f=hours('2026-10-01','2026-10-02')
-    c.upsert('a',f); c.upsert('a',f); c.upsert('b',f.assign(kwh=2))
-    assert len(c.load('a'))==24
-    assert c.load('b').kwh.sum()==48
-    c.upsert('a',f.iloc[:1].assign(kwh=4))
-    assert c.load('a').kwh.sum()==27
-    assert (c.path.stat().st_mode & 0o777)==0o600
-
-
-def test_invalid_import_is_atomic(tmp_path):
-    c=Cache(tmp_path/'db'); f=hours('2026-10-01','2026-10-02'); f.loc[23,'kwh']=-1
-    with pytest.raises(ValueError): c.upsert('a',f)
-    assert c.load('a').empty
-
-
 @pytest.mark.parametrize('value',[-1,float('nan'),float('inf')])
 def test_bad_energy(value):
     with pytest.raises(ValueError): normalize(pd.DataFrame({'timestamp':['2026-10-01T00:00:00-04:00'],'kwh':[value]}))

@@ -18,3 +18,16 @@ test('panning stays inside available data',()=>{
  assert.deepEqual(clampRange(90,110,0,100),[80,100]);
  assert.deepEqual(clampRange(-100,200,0,100),[0,100]);
 });
+const {freshness}=require('./deploy/assets/app.js');
+const now=Date.parse('2026-11-23T18:00:00Z');
+const fresh={synced:'2026-11-23T17:30:00Z',hours:[{day:'2026-11-22',hour:23,time:'2026-11-22T23:00:00-05:00',kwh:1}]};
+test('fresh readings show the actual successful sync time',()=>{
+ const f=freshness(fresh,now);assert.equal(f.warning,'');assert.match(f.text,/last successful sync/);assert.doesNotMatch(f.text,/checked hourly/);
+});
+test('newly generated snapshots cannot conceal an old sync',()=>{
+ assert.match(freshness({...fresh,synced:'2026-11-13T01:00:00Z',generated:'2026-11-23T18:00:00Z'},now).warning,/overdue/);
+});
+test('authentication failure stays visible with saved readings',()=>{
+ assert.match(freshness({...fresh,refresh:{state:'sign_in_required',last_success_at:fresh.synced}},now).warning,/sign-in required/);
+ assert.match(freshness({...fresh,refresh:{state:'sync_failed'}},now).warning,/refresh failed/);
+});

@@ -1,11 +1,11 @@
 """Strict hourly storage and deliberately conservative household analysis."""
 import io
 import math
-import sqlite3
-from pathlib import Path
 from datetime import date, timedelta
 import numpy as np
 import pandas as pd
+
+from deploy.hydro_store import connect
 
 TZ = 'America/Toronto'
 
@@ -38,38 +38,36 @@ def normalize(frame):
 
 
 class Cache:
-    def __init__(self, path):
-        path = Path(path); path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.path = path
-        with self.connect() as db:
-            db.executescript('''CREATE TABLE IF NOT EXISTS hours (
-            contract TEXT, timestamp TEXT, kwh REAL, temperature_c REAL, quality TEXT,
-            PRIMARY KEY(contract,timestamp));
-            CREATE TABLE IF NOT EXISTS metadata(contract TEXT PRIMARY KEY, payload TEXT);
-            ''')
-        path.chmod(0o600)
-    def connect(self):
-        return sqlite3.connect(self.path)
     def upsert(self, contract, frame):
         clean = normalize(frame)
-        with self.connect() as db:
-            db.executemany('INSERT OR REPLACE INTO hours VALUES (?,?,?,?,?)',
-                           [(contract,*r) for r in clean.itertuples(index=False, name=None)])
+        rows = [(contract, timestamp, kwh, None if pd.isna(temp) else temp, quality)
+                for timestamp, kwh, temp, quality in clean.itertuples(index=False, name=None)]
+        with connect() as connection, connection.cursor() as db:
+            db.executemany('INSERT INTO hours VALUES (%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE '
+                           'kwh=VALUES(kwh), temperature_c=VALUES(temperature_c), quality=VALUES(quality)',
+                           rows)
+            connection.commit()
         return len(clean)
     def load(self, contract):
-        with self.connect() as db:
-            f = pd.read_sql_query('SELECT timestamp,kwh,temperature_c,quality FROM hours WHERE contract=? ORDER BY timestamp', db, params=[contract])
+        with connect() as connection, connection.cursor() as db:
+            columns = ['timestamp', 'kwh', 'temperature_c', 'quality']
+            db.execute('SELECT timestamp,kwh,temperature_c,quality FROM hours WHERE contract=%s ORDER BY timestamp', (contract,))
+            f = pd.DataFrame(db.fetchall(), columns=columns)
         f.timestamp = pd.to_datetime(f.timestamp, utc=True).dt.tz_convert(TZ)
         return f
     def contracts(self):
-        with self.connect() as db:
-            return [r[0] for r in db.execute('SELECT DISTINCT contract FROM hours ORDER BY contract')]
+        with connect() as connection, connection.cursor() as db:
+            db.execute('SELECT DISTINCT contract FROM hours ORDER BY contract')
+            return [r[0] for r in db]
     def metadata(self, contract, payload=None):
         import json
-        with self.connect() as db:
+        with connect() as connection, connection.cursor() as db:
             if payload is not None:
-                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',(contract,json.dumps(payload)))
-            row = db.execute('SELECT payload FROM metadata WHERE contract=?',(contract,)).fetchone()
+                db.execute('INSERT INTO metadata VALUES (%s,%s) ON DUPLICATE KEY UPDATE payload=VALUES(payload)',
+                           (contract,json.dumps(payload)))
+                connection.commit()
+            db.execute('SELECT payload FROM metadata WHERE contract=%s',(contract,))
+            row = db.fetchone()
         return json.loads(row[0]) if row else {}
 
 

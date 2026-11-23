@@ -1,34 +1,100 @@
-# Static hosting and hourly refresh
+# Private static hosting and hourly refresh
 
-Use an existing HTTPS web server with a virtual host. The Python process runs only during a refresh. No MariaDB, container, or always-running application worker is needed.
+Use an existing MariaDB server and HTTPS virtual host. Python runs only during refresh; no persistent application worker is needed. All paths, domains and usernames below are examples.
 
-Keep the source, `.venv`, SQLite cache and session outside the webroot. The only served path should be the `current/` symlink under the publication directory. The following paths and hostname are examples, not existing infrastructure.
+## Database and enrollment
 
-Example cron entry for the account that owns the private cache (use absolute paths):
+Create a dedicated service account and MariaDB schema. As the database administrator, adapt these example statements to the account running the importer:
+
+```sql
+CREATE DATABASE hydro_dashboard CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+CREATE USER 'hydro-dashboard'@'localhost' IDENTIFIED VIA unix_socket;
+GRANT SELECT, INSERT, UPDATE ON hydro_dashboard.* TO 'hydro-dashboard'@'localhost';
+```
+
+Apply `deploy/schema.sql` to that schema as administrator. Run importer and refresh as the matching OS account. Use `HYDRO_DB_NAME`, `HYDRO_DB_USER`, and `HYDRO_DB_SOCKET` for other names. For password authentication, use `HYDRO_DB_PASSWORD_FILE` outside the webroot, readable only by the service account. `HYDRO_DB_HOST`/`HYDRO_DB_PORT` support local loopback TCP; this example does not configure encrypted remote database access.
+
+Keep source, environment, session and refresh status outside the webroot:
+
+```sh
+/opt/hydro/.venv/bin/python /opt/hydro/sync.py --auth-client mobile --days 90 --data-dir /var/lib/hydro/account
+/opt/hydro/.venv/bin/python /opt/hydro/deploy/refresh.py --data-dir /var/lib/hydro/account --publish-dir /var/lib/hydro/snapshots --publish-only
+```
+
+Provision these directories for the service account. Sessions are mode 0600. Exported directories are 0750 and files 0640: grant the web server read/traverse access only to snapshots and their parents, using a shared group or inherited ACL. Never grant it access to `account/` or database credentials. Verify access as the actual web-server user before enabling the virtual host.
+
+Example cron, using a non-overlap lock:
 
 ```cron
 17 * * * * flock -n /var/lib/hydro/refresh.lock /opt/hydro/.venv/bin/python /opt/hydro/deploy/refresh.py --data-dir /var/lib/hydro/account --publish-dir /var/lib/hydro/snapshots >> /var/lib/hydro/refresh.log 2>&1
 ```
 
-Provision `/var/lib/hydro` for that service account and authenticate once interactively with `sync.py`. The importer needs writable private files. The web-server account needs read/traverse access only to `snapshots/current/` and its parents, not to `account/`. Monitor refresh exit codes and arrange log rotation. A successful hourly run does not mean Hydro has already released the latest hour.
+Monitor exit status and rotate logs. Snapshot publication uses a same-filesystem atomic symlink switch, retains three snapshots, and preserves the served snapshot if export fails. Keep `current` as a symlink. Failed sync publishes cached readings with its failure state and does not advance the last-success timestamp. Reconnect interactively on exit 20; scheduled jobs never solicit email codes.
 
-Add this protected location to an **existing TLS-enabled** Nginx virtual host for your chosen hostname:
+## Shared NTKA / OIDC login
+
+Register a dedicated confidential OIDC client in your identity service with exact callback `https://hydro.example.com/oauth2/callback`. Grant only the intended owner access; disable guest grants and public enrollment for this app. Use your existing trusted identity provider; do not put Hydro account credentials in the proxy.
+
+Run OAuth2 Proxy bound only to `127.0.0.1:8797`, with a small systemd memory cap and these illustrative settings:
+
+```toml
+provider = "oidc"
+oidc_issuer_url = "https://login.example.com"
+client_id = "REPLACE_WITH_REGISTERED_CLIENT_ID"
+redirect_url = "https://hydro.example.com/oauth2/callback"
+http_address = "127.0.0.1:8797"
+upstreams = ["static://202"]
+scope = "openid profile email"
+code_challenge_method = "S256"
+cookie_name = "__Host-hydro_identity"
+cookie_secure = true
+cookie_httponly = true
+cookie_samesite = "lax"
+cookie_expire = "5m"
+reverse_proxy = true
+skip_provider_button = true
+```
+
+Provide the client secret, random cookie secret, and explicit owner email allowlist through protected files or systemd `LoadCredential`. Use OAuth2 Proxy's `--client-secret-file`, `--cookie-secret-file`, and `--authenticated-emails-file` options. Keep issuer, audience, signature and nonce validation enabled. The provider should issue verified email claims; review claim semantics for passkey-only identities rather than broadly weakening validation. An authenticated provider account alone must not grant access to the dashboard.
+
+Inside an existing TLS-enabled Nginx server:
 
 ```nginx
 server_name hydro.example.com;
 root /var/lib/hydro/snapshots/current;
 index index.html;
+add_header Cache-Control "no-store" always;
+add_header X-Content-Type-Options "nosniff" always;
 
-auth_basic "Private electricity usage";
-auth_basic_user_file /etc/nginx/hydro.htpasswd;
-
+location = /_hydro_session {
+    internal;
+    proxy_pass http://127.0.0.1:8797/oauth2/auth;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Authorization "";
+    proxy_set_header Host hydro.example.com;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Original-URL https://hydro.example.com$request_uri;
+}
+location ~ ^/oauth2/(start|callback|sign_out)$ {
+    proxy_pass http://127.0.0.1:8797;
+    proxy_set_header Host hydro.example.com;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host hydro.example.com;
+    proxy_set_header X-Auth-Request-Redirect https://hydro.example.com/;
+}
+location = /data.json {
+    auth_request /_hydro_session;
+    try_files $uri =404;
+}
 location / {
+    auth_request /_hydro_session;
+    error_page 401 = @hydro_signin;
     try_files $uri $uri/ =404;
-    add_header Cache-Control "no-store" always;
-    add_header X-Content-Type-Options "nosniff" always;
+}
+location @hydro_signin {
+    return 302 /oauth2/start?rd=%2F;
 }
 ```
 
-This is a location/server fragment, not a complete TLS configuration. Create the password file locally, keep it outside the served directory, and redirect HTTP to HTTPS. Check the server configuration before reloading it. Verify an unauthenticated request to both `/` and `/data.json` receives `401`, and an authenticated request can load the graph. Protect consumption snapshots as private data.
-
-`refresh.py` uses sibling directories and an atomic symlink replacement on the same filesystem. Do not replace `current` with a real directory. Use `--skip-sync` with a synthetic cache to test your publication path before enabling a timer. Session expiry leaves the last complete snapshot available; perform a new interactive sign-in to resume updates.
+This is a fragment, not a complete TLS configuration. Redirect HTTP to HTTPS, check Nginx configuration before reload, and keep OAuth2 Proxy inaccessible externally. Verify anonymous `/` redirects to login, `/data.json` returns 401, fake identity headers do not bypass authentication, unentitled users are denied, and the owner callback loads the graph. Consumption files and all assets require the same access control.
