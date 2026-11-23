@@ -4,9 +4,9 @@ const assert=require('node:assert/strict');
 const {series,visibleStats,clampRange}=require('./deploy/assets/app.js');
 const hours=[{day:'2026-10-01',hour:0,kwh:1},{day:'2026-10-01',hour:2,kwh:3},{day:'2026-10-02',hour:0,kwh:2}];
 test('missing usage stays empty, zero temperature is valid, missing temperature stays empty',()=>{
- const s=series({hours,daily:[{dateJourConso:'2026-10-01',tempMoyenneQuot:0}]});
+ const s=series({hours,weather:{hourly:[{time:'2026-10-01T04:00:00Z',temp:0}]}});
  assert.deepEqual(s.usage.slice(0,3),[1,null,3]);
- assert.equal(s.temperature[0],0);assert.equal(s.temperature[24],null);
+ assert.equal(s.outside[0],0);assert.equal(s.outside[24],null);
 });
 test('visible totals exclude missing readings and use half-open bounds',()=>{
  const s=series({hours,daily:[]});

@@ -1,6 +1,6 @@
 # Hydro usage dashboard
 
-A small, self-hosted Hydro-Québec dashboard: one scrollable graph of hourly electricity usage, daily mean outside temperature and optional current weather estimates. Includes 7-day, 30-day and full-history views, missing-data gaps, and statistics for the visible readings.
+A small, self-hosted Hydro-Québec dashboard: one scrollable graph of hourly electricity usage and optional current weather estimates. Includes 7-day, 30-day and full-history views, missing-data gaps, and statistics for the visible readings.
 
 The browser serves static files. An hourly one-shot Python importer updates MariaDB and atomically publishes a snapshot. It can share an existing database server and HTTPS virtual host; it needs no persistent Python worker or JavaScript build step.
 
@@ -57,7 +57,7 @@ Open-Meteo current conditions are model estimates at 15-minute intervals; histor
 ## Reading the graph
 
 - Usage is delayed hourly energy in **kWh**, not per-second power. It cannot identify an appliance by itself.
-- The dotted amber line is Hydro's **daily mean** temperature. Optional blue weather estimates come from Open-Meteo, with a separate current-temperature timestamp. Neither is an indoor or on-site sensor reading.
+- The dotted orange line shows hourly weather estimates from Open-Meteo, with a separate current-temperature timestamp. Hydro's daily mean is omitted from the graph. Weather estimates are not indoor or on-site sensor readings.
 - Labels use Toronto time. Missing readings remain gaps; valid zeroes are retained.
 - Hydro's unqualified local hour labels are ambiguous around daylight-saving changes. The importer skips those transition days rather than guessing.
 - Last successful sync is distinct from snapshot generation. Sign-in, failed-refresh, overdue and stale-upstream states are visible.

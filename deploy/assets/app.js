@@ -19,10 +19,9 @@ function series(data){
  const weather=new Map((data.weather?.hourly||[]).map(r=>[weatherWall(r.time),r.temp]));
  const start=wallTime(hours[0]),end=Math.max(wallTime(hours[hours.length-1])+HOUR,...[...weather.keys()].map(t=>t+HOUR));
  const energy=new Map(hours.map(r=>[wallTime(r),r]));
- const daily=new Map(data.daily.map(r=>[r.dateJourConso,r.tempMoyenneQuot]));
- const x=[],usage=[],temperature=[],outside=[],dayLabels=[];
- for(let t=start;t<end;t+=HOUR){const day=new Date(t).toISOString().slice(0,10),r=energy.get(t),temp=daily.get(day);x.push(new Date(t).toISOString().slice(0,19));usage.push(r?r.kwh:null);temperature.push(Number.isFinite(temp)?temp:null);outside.push(Number.isFinite(weather.get(t))?weather.get(t):null);dayLabels.push(day)}
- return {hours,start,end,x,usage,temperature,outside,dayLabels};
+ const x=[],usage=[],outside=[];
+ for(let t=start;t<end;t+=HOUR){const r=energy.get(t);x.push(new Date(t).toISOString().slice(0,19));usage.push(r?r.kwh:null);outside.push(Number.isFinite(weather.get(t))?weather.get(t):null)}
+ return {hours,start,end,x,usage,outside};
 }
 function visibleStats(hours,range){const selected=hours.filter(r=>wallTime(r)>=range[0]&&wallTime(r)<range[1]);const total=selected.reduce((n,r)=>n+r.kwh,0);return {count:selected.length,total,average:selected.length?total/selected.length:NaN,peak:selected.length?Math.max(...selected.map(r=>r.kwh)):NaN}}
 function clampRange(a,b,start,end){let width=Math.min(b-a,end-start);if(!Number.isFinite(width)||width<=0)width=Math.min(7*DAY,end-start);let left=Math.max(start,Math.min(a,end-width));return[left,left+width]}
@@ -48,8 +47,7 @@ async function load(){try{
  const narrow=window.innerWidth<650;
  await Plotly.react('graph',[
   {x:SERIES.x,y:SERIES.usage,type:'bar',name:'Hourly usage',marker:{color:'#63d9bd'},opacity:.86,hovertemplate:'%{x|%b %d, %H:%M}<br><b>%{y:.2f} kWh</b> used during this hour<extra></extra>'},
-  {x:SERIES.x,y:SERIES.temperature,type:'scatter',mode:'lines',name:'Outside · daily mean',yaxis:'y2',connectgaps:false,line:{color:'#ecb16a',width:1.5,shape:'hv',dash:'dot'},customdata:SERIES.dayLabels,hovertemplate:'%{customdata}<br>Outside daily mean: <b>%{y:.1f}°C</b><extra></extra>'},
-  {x:SERIES.x,y:SERIES.outside,type:'scatter',mode:'lines',name:'Outside · weather estimate',yaxis:'y2',connectgaps:false,line:{color:'#8dc5ff',width:2},hovertemplate:'%{x|%b %d, %H:%M}<br>Weather estimate: <b>%{y:.1f}°C</b><extra></extra>'}
+  {x:SERIES.x,y:SERIES.outside,type:'scatter',mode:'lines',name:'Outside · weather estimate',yaxis:'y2',connectgaps:false,line:{color:'#ecb16a',width:2,dash:'dot'},hovertemplate:'%{x|%b %d, %H:%M}<br>Weather estimate: <b>%{y:.1f}°C</b><extra></extra>'}
  ],{
   paper_bgcolor:'#102126',plot_bgcolor:'#102126',font:{family:'system-ui',color:'#92aaa9',size:narrow?10:12},margin:{l:narrow?42:58,r:narrow?42:58,t:22,b:30},showlegend:false,dragmode:'pan',hovermode:'x unified',hoverlabel:{bgcolor:'#183139',bordercolor:'#36555a',font:{color:'#e7f0ef'}},bargap:.12,uirevision:'hydro-simple',
   xaxis:{type:'date',range:RANGE.map(t=>new Date(t).toISOString().slice(0,19)),gridcolor:'#20363c',zeroline:false,tickformat:'%b %d\n%H:%M',rangeslider:{visible:true,thickness:.12,bgcolor:'#0c191e',borderwidth:0,range:[new Date(SERIES.start).toISOString().slice(0,19),new Date(SERIES.end).toISOString().slice(0,19)]}},
